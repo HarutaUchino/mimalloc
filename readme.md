@@ -3,6 +3,39 @@
 
 [<img align="right" src="https://dev.azure.com/Daan0324/mimalloc/_apis/build/status/microsoft.mimalloc?branchName=dev"/>](https://dev.azure.com/Daan0324/mimalloc/_build?definitionId=1&_a=summary)
 
+### Debugging Numerical Output
+
+This section explains how to use `_mi_fprintf` to print the contents of variables, such as integers and floating-point numbers, to the console. This is useful for checking variable values during debugging.
+
+#### Code Example
+
+```c
+int access_count = 150;
+double completion_rate = 99.9;
+
+// Use %d for integers and %f for floating-point numbers.
+_mi_fprintf(NULL, NULL, "Access Count: %d, Completion Rate: %f%%\n", access_count, completion_rate);
+```
+
+-----
+
+#### Explanation of Format Specifiers
+
+  * `**%d**`: The specifier for displaying a decimal **integer**. The value of `access_count` is inserted at this position.
+  * `**%f**`: The specifier for displaying a **floating-point number** (float/double). The value of `completion_rate` is inserted at this position.
+  * `**%%**`: Use this to print a literal `%` character.
+
+-----
+
+#### Example Output
+
+Executing the code above will produce the following output in the console:
+
+```text
+Access Count: 150, Completion Rate: 99.900000%
+```
+
+
 # mimalloc
 
 &nbsp;
