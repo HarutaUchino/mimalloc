@@ -217,12 +217,18 @@ void print_malloc_stats(int is_final) {
   clock_t current_time = clock();
   int64_t program_elapsed_ms = (int64_t)((current_time - g_program_start_time) * 1000LL) / CLOCKS_PER_SEC;
 
-  // Read atomic values using mimalloc atomic operations
-  int64_t call_count = g_malloc_call_count;       // Simple volatile read
-  int64_t total_time = g_total_execution_time_us; // Simple volatile read
-  int64_t min_time = g_min_execution_time_us;     // Simple volatile read
-  int64_t max_time = g_max_execution_time_us;     // Simple volatile read
+  // Read atomic values using mimalloc atomic operations (volatile reads)
+  int64_t call_count = g_malloc_call_count;
+  int64_t total_time = g_total_execution_time_us;
+  int64_t min_time = g_min_execution_time_us;
+  int64_t max_time = g_max_execution_time_us;
   int64_t avg_time_us = (call_count > 0) ? total_time / call_count : 0;
+
+  // Debug: print what we read
+  if (is_final) {
+    _mi_fprintf(NULL, NULL, "DEBUG: Reading final stats - raw values: count=%lld, total=%lld, min=%lld, max=%lld\n",
+                (long long)call_count, (long long)total_time, (long long)min_time, (long long)max_time);
+  }
 
   if (is_final) {
     _mi_fprintf(NULL, NULL, "\n=== FINAL MI_MALLOC PERFORMANCE STATISTICS ===\n");
@@ -250,13 +256,16 @@ void print_final_malloc_stats(void) {
 }
 
 mi_decl_nodiscard extern inline mi_decl_restrict void* mi_malloc(size_t size) mi_attr_noexcept {
-  // Initialize on first call
-  static int is_initialized = 0;
-  if (!is_initialized) {
-    if (atexit(print_final_malloc_stats) == 0) {
-      g_program_start_time = clock();
-      is_initialized = 1;
-      _mi_fprintf(NULL, NULL, "MI_MALLOC performance tracking initialized\n");
+  // Initialize on first call (thread-safe)
+  static volatile int64_t is_initialized = 0;
+  if (mi_atomic_loadi64_relaxed(&is_initialized) == 0) {
+    // Use compare-and-swap to ensure only one thread initializes
+    int64_t expected = 0;
+    if (mi_atomic_casi64_strong_acq_rel((volatile _Atomic(int64_t)*)&is_initialized, &expected, 1)) {
+      if (atexit(print_final_malloc_stats) == 0) {
+        g_program_start_time = clock();
+        _mi_fprintf(NULL, NULL, "MI_MALLOC performance tracking initialized\n");
+      }
     }
   }
 
@@ -271,22 +280,30 @@ mi_decl_nodiscard extern inline mi_decl_restrict void* mi_malloc(size_t size) mi
   int64_t execution_time_us = ((int64_t)(end_time - start_time) * 1000000LL) / CLOCKS_PER_SEC;
 
   // Update statistics atomically using mimalloc atomic operations
-  int64_t current_call_count = mi_atomic_addi64_relaxed(&g_malloc_call_count, 1) + 1;
+  // First, atomically increment the call count and get the new value
+  int64_t prev_count = mi_atomic_addi64_relaxed(&g_malloc_call_count, 1);
+  int64_t current_call_count = prev_count + 1;
+
+  // Atomically add to total execution time
   mi_atomic_addi64_relaxed(&g_total_execution_time_us, execution_time_us);
 
   // Update min/max times atomically using compare-and-swap loops
+  // For minimum time
   int64_t current_min = g_min_execution_time_us;
   while (execution_time_us < current_min) {
     if (mi_atomic_casi64_strong_acq_rel((volatile _Atomic(int64_t)*)&g_min_execution_time_us, &current_min, execution_time_us)) {
       break;
     }
+    // current_min gets updated by the CAS operation if it fails, so no need to reload
   }
 
+  // For maximum time
   int64_t current_max = g_max_execution_time_us;
   while (execution_time_us > current_max) {
     if (mi_atomic_casi64_strong_acq_rel((volatile _Atomic(int64_t)*)&g_max_execution_time_us, &current_max, execution_time_us)) {
       break;
     }
+    // current_max gets updated by the CAS operation if it fails, so no need to reload
   }
 
   // Periodic reporting (check with current call count)
@@ -294,9 +311,9 @@ mi_decl_nodiscard extern inline mi_decl_restrict void* mi_malloc(size_t size) mi
     print_malloc_stats(0); // is_final = 0
   }
 
-  // // Debug output for individual call (can be removed for production)
-  // _mi_fprintf(NULL, NULL, "mi_malloc call #%lld: size=%zu, time=%lld microseconds\n",
-  //             g_malloc_call_count, size, execution_time_us);
+  // Debug output for individual call (to verify thread-safety)
+  _mi_fprintf(NULL, NULL, "mi_malloc call #%lld: size=%zu, time=%lld microseconds, thread_id=%zu\n",
+              (long long)current_call_count, size, (long long)execution_time_us, (size_t)_mi_thread_id());
 
   return result;
 }
