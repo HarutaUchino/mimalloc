@@ -204,8 +204,88 @@ mi_decl_nodiscard extern inline mi_decl_restrict void* mi_heap_malloc(mi_heap_t*
   return _mi_heap_malloc_zero(heap, size, false);
 }
 
+// Global statistics for mi_malloc performance tracking
+static long long g_malloc_call_count = 0;
+static long long g_total_execution_time_us = 0; // Total time in microseconds
+static long long g_min_execution_time_us = 999999999LL; // Initialize to large value
+static long long g_max_execution_time_us = 0;
+static clock_t g_program_start_time;
+static const long long PERIODIC_REPORT_INTERVAL = 1000; // Report every 1000 calls
+
+// Function to print performance statistics
+void print_malloc_stats(int is_final) {
+  clock_t current_time = clock();
+  long long program_elapsed_ms = (long long)((current_time - g_program_start_time) * 1000LL) / CLOCKS_PER_SEC;
+  long long avg_time_us = (g_malloc_call_count > 0) ? g_total_execution_time_us / g_malloc_call_count : 0;
+
+  if (is_final) {
+    _mi_fprintf(NULL, NULL, "\n=== FINAL MI_MALLOC PERFORMANCE STATISTICS ===\n");
+  } else {
+    _mi_fprintf(NULL, NULL, "\n--- MI_MALLOC PERIODIC REPORT ---\n");
+  }
+
+  _mi_fprintf(NULL, NULL, "Total mi_malloc calls: %lld\n", g_malloc_call_count);
+  _mi_fprintf(NULL, NULL, "Total execution time: %lld microseconds\n", g_total_execution_time_us);
+  _mi_fprintf(NULL, NULL, "Average time per call: %lld microseconds\n", avg_time_us);
+  _mi_fprintf(NULL, NULL, "Minimum call time: %lld microseconds\n", g_min_execution_time_us);
+  _mi_fprintf(NULL, NULL, "Maximum call time: %lld microseconds\n", g_max_execution_time_us);
+  _mi_fprintf(NULL, NULL, "Program running time: %lld milliseconds\n", program_elapsed_ms);
+
+  if (is_final) {
+    _mi_fprintf(NULL, NULL, "===============================================\n");
+  } else {
+    _mi_fprintf(NULL, NULL, "--------------------------------------------\n");
+  }
+}
+
+// Exit handler to print final statistics
+void print_final_malloc_stats(void) {
+  print_malloc_stats(1); // is_final = 1
+}
+
 mi_decl_nodiscard extern inline mi_decl_restrict void* mi_malloc(size_t size) mi_attr_noexcept {
-  return mi_heap_malloc(mi_prim_get_default_heap(), size);
+  // Initialize on first call
+  static int is_initialized = 0;
+  if (!is_initialized) {
+    if (atexit(print_final_malloc_stats) == 0) {
+      g_program_start_time = clock();
+      is_initialized = 1;
+      _mi_fprintf(NULL, NULL, "MI_MALLOC performance tracking initialized\n");
+    }
+  }
+
+  // Start timing measurement
+  clock_t start_time = clock();
+
+  // Call the actual allocation function
+  void* result = mi_heap_malloc(mi_prim_get_default_heap(), size);
+
+  // End timing measurement
+  clock_t end_time = clock();
+  long long execution_time_us = ((long long)(end_time - start_time) * 1000000LL) / CLOCKS_PER_SEC;
+
+  // Update statistics
+  g_malloc_call_count++;
+  g_total_execution_time_us += execution_time_us;
+
+  // Update min/max times
+  if (execution_time_us < g_min_execution_time_us) {
+    g_min_execution_time_us = execution_time_us;
+  }
+  if (execution_time_us > g_max_execution_time_us) {
+    g_max_execution_time_us = execution_time_us;
+  }
+
+  // Periodic reporting
+  if (g_malloc_call_count % PERIODIC_REPORT_INTERVAL == 0) {
+    print_malloc_stats(0); // is_final = 0
+  }
+
+  // // Debug output for individual call (can be removed for production)
+  // _mi_fprintf(NULL, NULL, "mi_malloc call #%lld: size=%zu, time=%lld microseconds\n",
+  //             g_malloc_call_count, size, execution_time_us);
+
+  return result;
 }
 
 // zero initialized small block
