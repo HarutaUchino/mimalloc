@@ -306,14 +306,14 @@ mi_decl_nodiscard extern inline mi_decl_restrict void* mi_malloc(size_t size) mi
     // current_max gets updated by the CAS operation if it fails, so no need to reload
   }
 
-  // Periodic reporting (check with current call count)
-  if (current_call_count % PERIODIC_REPORT_INTERVAL == 0) {
-    print_malloc_stats(0); // is_final = 0
-  }
+  // Periodic reporting (check with current call count) - COMMENTED OUT FOR EXIT-ONLY REPORTING
+  // if (current_call_count % PERIODIC_REPORT_INTERVAL == 0) {
+  //   print_malloc_stats(0); // is_final = 0
+  // }
 
-  // Debug output for individual call (to verify thread-safety)
-  _mi_fprintf(NULL, NULL, "mi_malloc call #%lld: size=%zu, time=%lld microseconds, thread_id=%zu\n",
-              (long long)current_call_count, size, (long long)execution_time_us, (size_t)_mi_thread_id());
+  // // Debug output for individual call (to verify thread-safety)
+  // _mi_fprintf(NULL, NULL, "mi_malloc call #%lld: size=%zu, time=%lld microseconds, thread_id=%zu\n",
+  //             (long long)current_call_count, size, (long long)execution_time_us, (size_t)_mi_thread_id());
 
   return result;
 }
