@@ -3,6 +3,71 @@
 
 [<img align="right" src="https://dev.azure.com/Daan0324/mimalloc/_apis/build/status/microsoft.mimalloc?branchName=dev"/>](https://dev.azure.com/Daan0324/mimalloc/_build?definitionId=1&_a=summary)
 
+### Registering an Exit Handler on First Function Call
+
+This section explains how to use `atexit` to register a shutdown function only once, triggered the first time a specific function (in this case, `mi_malloc`) is called. A `static` variable is used to detect the initial function call, ensuring the registration happens only once.
+
+#### Objective
+
+To automatically print statistics, such as the total number of `mi_malloc` calls and the total program execution time, when the program terminates.
+
+#### Code Example
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+#define mi_decl_nodiscard
+#define mi_decl_restrict
+#define mi_attr_noexcept
+#define mi_heap_malloc(heap, size) malloc(size)
+#define mi_prim_get_default_heap() NULL
+extern void _mi_fprintf(void* s1, void* s2, const char* fmt, ...);
+
+long long g_malloc_call_count = 0;
+clock_t g_start_time;
+
+void print_final_stats(void) {
+    clock_t end_time = clock();
+    double elapsed_time = (double)(end_time - g_start_time) / CLOCKS_PER_SEC;
+
+    _mi_fprintf(NULL, NULL, "\n--- Program Final Stats ---\n");
+    _mi_fprintf(NULL, NULL, "Total mi_malloc calls: %lld\n", g_malloc_call_count);
+    _mi_fprintf(NULL, NULL, "Total Elapsed Time: %f seconds\n", elapsed_time);
+}
+
+mi_decl_nodiscard extern inline mi_decl_restrict void* mi_malloc(size_t size) mi_attr_noexcept {
+    static int is_initialized = 0;
+    if (!is_initialized && atexit(print_final_stats) == 0) {
+        g_start_time = clock();
+        is_initialized = 1;
+    }
+
+    g_malloc_call_count++;
+    
+    return mi_heap_malloc(mi_prim_get_default_heap(), size);
+}
+
+// Example main function to demonstrate usage
+int main(void) {
+    _mi_fprintf(NULL, NULL, "Program is running...\n");
+
+    void* p1 = mi_malloc(100);
+    void* p2 = mi_malloc(200);
+    void* p3 = mi_malloc(300);
+
+    free(p1);
+    free(p2);
+    free(p3);
+
+    _mi_fprintf(NULL, NULL, "Main processing finished.\n");
+
+    return 0;
+}
+```
+-----
+
 ### Debugging Numerical Output
 
 This section explains how to use `_mi_fprintf` to print the contents of variables, such as integers and floating-point numbers, to the console. This is useful for checking variable values during debugging.
