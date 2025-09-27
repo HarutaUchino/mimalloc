@@ -11,3 +11,10 @@ docs/
 *.gz
 .vscode
 .DS_STore
+
+test/
+!test/*.c
+!test/*.h
+!test/CMakeLists.txt
+
+diff/*
