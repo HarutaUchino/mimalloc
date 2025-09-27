@@ -19,11 +19,13 @@ REDIS_SRC_DIR="/home/uchino/software/mimalloc/redis/redis_source_build/redis-6.2
 OUT_DIR_BASE="./redis_bench_results"
 
 # 3. テストしたいアロケータのリストを定義
-# フォーマット: "ラベル|ライブラリへの絶対パス|exportする環境変数"
+# フォーマット: "ラベル|ライブラリへの絶対パス|exportする環境変数(複数の場合は';'で区切る)"
 ALLOCATORS=(
   "system|system|"
 #   "mimalloc|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|"
 #   "mi_PAGEMAP|/home/uchino/software/mimalloc/out/pagemap_commit_1/libmimalloc.so.3.1|"
+#   "mimalloc|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
+
 )
 
 # 4. 各アロケータで実行するテスト回数
@@ -113,9 +115,15 @@ for allocator_info in "${ALLOCATORS[@]}"; do
   # 区切り文字'|'で設定を分割
   IFS='|' read -r label lib_path export_vars <<< "$allocator_info"
 
-  # exportが必要な場合は実行
+  # exportが必要な場合は実行 (複数の場合は';'で区切る)
   if [ -n "$export_vars" ]; then
-    export $export_vars
+    # セミコロンで区切られた複数のexport文を実行
+    IFS=';' read -ra EXPORTS <<< "$export_vars"
+    for export_cmd in "${EXPORTS[@]}"; do
+      if [ -n "$export_cmd" ]; then
+        export $export_cmd
+      fi
+    done
   fi
 
   OUT_DIR="$OUT_DIR_BASE/$label"
