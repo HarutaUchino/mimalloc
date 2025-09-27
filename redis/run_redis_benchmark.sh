@@ -22,13 +22,46 @@ OUT_DIR_BASE="./redis_bench_results"
 # フォーマット: "ラベル|ライブラリへの絶対パス|exportする環境変数"
 ALLOCATORS=(
 #   "system|system|"
-#   "mimalloc|/home/uchino/software/mimalloc/out/release/libmimalloc.so|"
-  "mi_PAGEMAP|/home/uchino/software/mimalloc/out/release/libmimalloc.so|MIMALLOC_PAGEMAP_COMMIT=1"
+#   "mimalloc|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|"
+  "mi_PAGEMAP|/home/uchino/software/mimalloc/out/pagemap_commit_1/libmimalloc.so.3.1|"
 )
 # --------------------------------------------------------------------
 
 
 # --- スクリプト本体 (ここから下は変更不要) ---
+
+# メモリ使用量を取得する関数
+get_memory_stats() {
+  local pid=$1
+  local label=$2
+  local stage=$3
+
+  if [ ! -f "/proc/$pid/status" ]; then
+    echo "Process $pid not found, skipping memory stats"
+    return
+  fi
+
+  local vmsize_kb=$(grep "^VmSize:" /proc/$pid/status | awk '{print $2}')
+  local vmrss_kb=$(grep "^VmRSS:" /proc/$pid/status | awk '{print $2}')
+  local vmpeak_kb=$(grep "^VmPeak:" /proc/$pid/status | awk '{print $2}')
+  local vmhwm_kb=$(grep "^VmHWM:" /proc/$pid/status | awk '{print $2}')
+
+  # kBからMBに変換 (1024で割る)
+  local vmsize_mb=$(echo "scale=2; ${vmsize_kb:-0}/1024" | bc -l)
+  local vmrss_mb=$(echo "scale=2; ${vmrss_kb:-0}/1024" | bc -l)
+  local vmpeak_mb=$(echo "scale=2; ${vmpeak_kb:-0}/1024" | bc -l)
+  local vmhwm_mb=$(echo "scale=2; ${vmhwm_kb:-0}/1024" | bc -l)
+
+  echo "--- Memory Stats for $label ($stage) ---"
+  echo "VmSize: ${vmsize_mb:-N/A} MB"
+  echo "VmRSS:  ${vmrss_mb:-N/A} MB"
+  echo "VmPeak: ${vmpeak_mb:-N/A} MB"
+  echo "VmHWM:  ${vmhwm_mb:-N/A} MB"
+  echo "----------------------------------------"
+
+  # CSVファイルにも記録 (MB単位)
+  echo "$label,$stage,$vmsize_mb,$vmrss_mb,$vmpeak_mb,$vmhwm_mb" >> memory-stats.csv
+}
 
 # 各アロケータについてループ処理
 for allocator_info in "${ALLOCATORS[@]}"; do
@@ -46,6 +79,9 @@ for allocator_info in "${ALLOCATORS[@]}"; do
   mkdir -p "$OUT_DIR"
   cd "$OUT_DIR"
 
+  # メモリ統計用CSVファイルのヘッダーを作成
+  echo "allocator,stage,vmsize_mb,vmrss_mb,vmpeak_mb,vmhwm_mb" > memory-stats.csv
+
   echo "================================================="
   echo " Benchmarking Allocator: $label"
   echo "================================================="
@@ -62,6 +98,9 @@ for allocator_info in "${ALLOCATORS[@]}"; do
   SERVER_PID=$!
   sleep 1
 
+  # Redis起動直後のメモリ使用量を記録
+  get_memory_stats $SERVER_PID "$label" "after_startup"
+
   # 2. データベースをクリア
   "$REDIS_SRC_DIR/redis-cli" flushall
   sleep 1
@@ -69,13 +108,23 @@ for allocator_info in "${ALLOCATORS[@]}"; do
   # 3. ベンチマーク実行 (CSV形式)
   # -r 1000000 -n 100000 -P 16 -t lpush,lrange --csv > "$CSV_OUT_FILE"
   CSV_OUT_FILE="benchmark-result.csv"
+
+  # ベンチマーク開始前のメモリ使用量を記録
+  get_memory_stats $SERVER_PID "$label" "before_benchmark"
+
   "$REDIS_SRC_DIR/redis-benchmark" -n 1000000 -c 50 -P 16 -t lpush,lrange --csv > "$CSV_OUT_FILE"
+
+  # ベンチマーク終了後のメモリ使用量を記録
+  get_memory_stats $SERVER_PID "$label" "after_benchmark"
 
   # 4. データベースを再度クリア
   "$REDIS_SRC_DIR/redis-cli" flushall
   sleep 1
 
   # 5. Redisサーバーをシャットダウン
+  # シャットダウン前の最終メモリ使用量を記録
+  get_memory_stats $SERVER_PID "$label" "before_shutdown"
+
   "$REDIS_SRC_DIR/redis-cli" shutdown
   sleep 1
   wait $SERVER_PID 2>/dev/null || true
@@ -91,6 +140,11 @@ for allocator_info in "${ALLOCATORS[@]}"; do
   echo "--- Throughput for $label (requests per second) ---"
   echo $THROUGHPUT
   echo "-------------------------------------------------------"
+
+  echo
+  echo "--- Memory Statistics Summary for $label ---"
+  cat memory-stats.csv
+  echo "--------------------------------------------"
   echo
   
   # 親ディレクトリに戻る
