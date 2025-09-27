@@ -27,14 +27,19 @@ ALLOCATORS=(
 )
 
 # 4. 各アロケータで実行するテスト回数
-NUM_RUNS=1
+NUM_RUNS=3
 
 # 5. 各テスト実行間のスリープ時間（秒）
-SLEEP_BETWEEN_RUNS=600  # 10分 = 600秒
+SLEEP_BETWEEN_RUNS=1
 # --------------------------------------------------------------------
 
 
 # --- スクリプト本体 (ここから下は変更不要) ---
+
+# サマリーCSVファイルを初期化
+mkdir -p "$OUT_DIR_BASE"
+echo "allocator,avg_latency_ms,min_latency_ms,p50_latency_ms,p95_latency_ms" > "$OUT_DIR_BASE/throughput_summary.csv"
+echo "allocator,max_vmrss_mb,max_vmsize_mb,avg_vmrss_mb,avg_vmsize_mb" > "$OUT_DIR_BASE/memory_summary.csv"
 
 # 統計計算関数
 calculate_stats() {
@@ -160,7 +165,7 @@ for allocator_info in "${ALLOCATORS[@]}"; do
 
     get_memory_stats $SERVER_PID "$label" "before_benchmark" "$run"
 
-    "$REDIS_SRC_DIR/redis-benchmark" -n 1000000 -c 50 -P 16 -t lpush,lrange --csv > "$CSV_OUT_FILE"
+    "$REDIS_SRC_DIR/redis-benchmark" -n 1000000 -d 1024 -c 50 -P 16 -t lpush,lrange --csv > "$CSV_OUT_FILE"
 
     get_memory_stats $SERVER_PID "$label" "after_benchmark" "$run"
 
@@ -223,6 +228,22 @@ for allocator_info in "${ALLOCATORS[@]}"; do
   echo "=================================="
   echo
 
+  # LPUSH平均レイテンシ情報を収集してサマリーファイルに追加
+  lpush_avg_latency=$(grep '^"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$5; count++} END {print (count>0 ? sum/count : 0)}')
+  lpush_min_latency=$(grep '^"LPUSH",' all_benchmark_results.csv | awk -F',' 'BEGIN{min=999999} {if($6<min) min=$6} END {print (min==999999 ? 0 : min)}')
+  lpush_p50_latency=$(grep '^"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$7; count++} END {print (count>0 ? sum/count : 0)}')
+  lpush_p95_latency=$(grep '^"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$8; count++} END {print (count>0 ? sum/count : 0)}')
+
+  # メモリ使用量の最大値と平均値を計算
+  max_vmrss=$(awk -F',' 'NR>1 {if($5>max) max=$5} END {print (max ? max : 0)}' all_memory_stats.csv)
+  max_vmsize=$(awk -F',' 'NR>1 {if($4>max) max=$4} END {print (max ? max : 0)}' all_memory_stats.csv)
+  avg_vmrss=$(awk -F',' 'NR>1 {sum+=$5; count++} END {print (count>0 ? sum/count : 0)}' all_memory_stats.csv)
+  avg_vmsize=$(awk -F',' 'NR>1 {sum+=$4; count++} END {print (count>0 ? sum/count : 0)}' all_memory_stats.csv)
+
+  # サマリーファイルに書き込み
+  echo "$label,$lpush_avg_latency,$lpush_min_latency,$lpush_p50_latency,$lpush_p95_latency" >> "$OUT_DIR_BASE/throughput_summary.csv"
+  echo "$label,$max_vmrss,$max_vmsize,$avg_vmrss,$avg_vmsize" >> "$OUT_DIR_BASE/memory_summary.csv"
+
   # 親ディレクトリに戻る
   cd ../..
 
@@ -231,3 +252,8 @@ done
 
 set +x
 echo "✅ All benchmarks completed."
+echo
+echo "=== SUMMARY FILES CREATED ==="
+echo "Throughput summary: $OUT_DIR_BASE/throughput_summary.csv"
+echo "Memory summary: $OUT_DIR_BASE/memory_summary.csv"
+echo "=============================="
