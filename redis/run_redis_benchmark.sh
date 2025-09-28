@@ -23,9 +23,17 @@ OUT_DIR_BASE="./redis_bench_results/$TIMESTAMP"
 # フォーマット: "ラベル|ライブラリへの絶対パス|exportする環境変数(複数の場合は';'で区切る)"
 ALLOCATORS=(
   "mimalloc_default|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|"
-  "mi_PAGEMAP|/home/uchino/software/mimalloc/out/pagemap_commit_1/libmimalloc.so.3.1|"
-  "mimalloc_optimized|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
-  "system|system|"
+  # "mi_PAGEMAP|/home/uchino/software/mimalloc/out/pagemap_commit_1/libmimalloc.so.3.1|"
+  # "mimalloc_optimized|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
+  # "system|system|"
+  # slice size allocators without optimized options
+  "mimalloc_slice_8KB|/home/uchino/software/mimalloc/out/slice_8KB/libmimalloc.so.3.1|"
+  "mimalloc_slice_16KB|/home/uchino/software/mimalloc/out/slice_16KB/libmimalloc.so.3.1|"
+  "mimalloc_slice_32KB|/home/uchino/software/mimalloc/out/slice_32KB/libmimalloc.so.3.1|"
+  # slice size allocators with optimized options
+  "mimalloc_slice_8KB_opt|/home/uchino/software/mimalloc/out/slice_8KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
+  "mimalloc_slice_16KB_opt|/home/uchino/software/mimalloc/out/slice_16KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
+  "mimalloc_slice_32KB_opt|/home/uchino/software/mimalloc/out/slice_32KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
 )
 
 # 4. 各アロケータで実行するテスト回数
