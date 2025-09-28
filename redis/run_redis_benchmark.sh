@@ -29,14 +29,14 @@ ALLOCATORS=(
 )
 
 # 4. 各アロケータで実行するテスト回数
-NUM_RUNS=30
+NUM_RUNS=10
 
 # 5. 各テスト実行間のスリープ時間（秒）
 SLEEP_BETWEEN_RUNS=60
 
 # 6. ベンチマーク設定
 BENCH_OPERATIONS=1000      # -n パラメータ: 実行する操作数
-BENCH_DATA_SIZE=1024       # -d パラメータ: データサイズ（バイト）
+BENCH_DATA_SIZE=10       # -d パラメータ: データサイズ（バイト）
 BENCH_CLIENTS=50           # -c パラメータ: 並行クライアント数
 BENCH_PIPELINE=16          # -P パラメータ: パイプライン設定
 BENCH_TESTS="lpush,lrange" # -t パラメータ: テストタイプ
