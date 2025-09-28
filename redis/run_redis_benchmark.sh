@@ -38,8 +38,23 @@ SLEEP_BETWEEN_RUNS=300
 
 # --- スクリプト本体 (ここから下は変更不要) ---
 
+# 元の作業ディレクトリを保存
+ORIGINAL_PWD=$(pwd)
+
 # サマリーCSVファイルを初期化
 mkdir -p "$OUT_DIR_BASE"
+
+# Git リポジトリを初期化（まだ存在しない場合）
+REDIS_BENCH_GIT_DIR="./redis_bench_results"
+if [ ! -d "$REDIS_BENCH_GIT_DIR/.git" ]; then
+  echo "Initializing Git repository in $REDIS_BENCH_GIT_DIR..."
+  cd "$REDIS_BENCH_GIT_DIR"
+  git init
+  git config user.name "Redis Benchmark Automation"
+  git config user.email "benchmark@localhost"
+  cd "$ORIGINAL_PWD"
+fi
+
 echo "allocator,avg_latency_ms,min_latency_ms,p50_latency_ms,p95_latency_ms" > "$OUT_DIR_BASE/throughput_summary.csv"
 echo "allocator,max_vmrss_mb,max_vmsize_mb,avg_vmrss_mb,avg_vmsize_mb" > "$OUT_DIR_BASE/memory_summary.csv"
 
@@ -237,31 +252,87 @@ for allocator_info in "${ALLOCATORS[@]}"; do
   echo
 
   # LPUSH平均レイテンシ情報を収集してサマリーファイルに追加
-  lpush_avg_latency=$(grep '^"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$5; count++} END {print (count>0 ? sum/count : 0)}')
-  lpush_min_latency=$(grep '^"LPUSH",' all_benchmark_results.csv | awk -F',' 'BEGIN{min=999999} {if($6<min) min=$6} END {print (min==999999 ? 0 : min)}')
-  lpush_p50_latency=$(grep '^"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$7; count++} END {print (count>0 ? sum/count : 0)}')
-  lpush_p95_latency=$(grep '^"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$8; count++} END {print (count>0 ? sum/count : 0)}')
+  lpush_avg_latency=$(grep ',"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$5; count++} END {printf "%.3f", (count>0 ? sum/count : 0)}')
+  lpush_min_latency=$(grep ',"LPUSH",' all_benchmark_results.csv | awk -F',' 'BEGIN{min=999999} {if($6+0<min) min=$6+0} END {printf "%.3f", (min==999999 ? 0 : min)}')
+  lpush_p50_latency=$(grep ',"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$7; count++} END {printf "%.3f", (count>0 ? sum/count : 0)}')
+  lpush_p95_latency=$(grep ',"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$8; count++} END {printf "%.3f", (count>0 ? sum/count : 0)}')
 
   # メモリ使用量の最大値と平均値を計算
-  max_vmrss=$(awk -F',' 'NR>1 {if($5>max) max=$5} END {print (max ? max : 0)}' all_memory_stats.csv)
-  max_vmsize=$(awk -F',' 'NR>1 {if($4>max) max=$4} END {print (max ? max : 0)}' all_memory_stats.csv)
-  avg_vmrss=$(awk -F',' 'NR>1 {sum+=$5; count++} END {print (count>0 ? sum/count : 0)}' all_memory_stats.csv)
-  avg_vmsize=$(awk -F',' 'NR>1 {sum+=$4; count++} END {print (count>0 ? sum/count : 0)}' all_memory_stats.csv)
+  max_vmrss=$(awk -F',' 'NR>1 {if($5+0>max) max=$5+0} END {print (max ? max : 0)}' all_memory_stats.csv)
+  max_vmsize=$(awk -F',' 'NR>1 {if($4+0>max) max=$4+0} END {print (max ? max : 0)}' all_memory_stats.csv)
+  avg_vmrss=$(awk -F',' 'NR>1 {sum+=$5; count++} END {printf "%.2f", (count>0 ? sum/count : 0)}' all_memory_stats.csv)
+  avg_vmsize=$(awk -F',' 'NR>1 {sum+=$4; count++} END {printf "%.2f", (count>0 ? sum/count : 0)}' all_memory_stats.csv)
 
-  # サマリーファイルに書き込み
-  echo "$label,$lpush_avg_latency,$lpush_min_latency,$lpush_p50_latency,$lpush_p95_latency" >> "$OUT_DIR_BASE/throughput_summary.csv"
-  echo "$label,$max_vmrss,$max_vmsize,$avg_vmrss,$avg_vmsize" >> "$OUT_DIR_BASE/memory_summary.csv"
+  # サマリーファイルに書き込み (絶対パスを使用)
+  echo "$label,$lpush_avg_latency,$lpush_min_latency,$lpush_p50_latency,$lpush_p95_latency" >> "$ORIGINAL_PWD/$OUT_DIR_BASE/throughput_summary.csv"
+  echo "$label,$max_vmrss,$max_vmsize,$avg_vmrss,$avg_vmsize" >> "$ORIGINAL_PWD/$OUT_DIR_BASE/memory_summary.csv"
+
+  # Git commit for this allocator's results
+  cd "$ORIGINAL_PWD/$REDIS_BENCH_GIT_DIR"
+  git add "$TIMESTAMP/"
+
+  # Create detailed commit message
+  SLEEP_COUNT=$((NUM_RUNS - 1))  # Sleep applied between runs, so one less than total runs
+  COMMIT_MSG="add $label benchmark results
+
+Allocator: $label
+Config: ${export_vars:-default}
+Runs: $NUM_RUNS
+Sleep applied: $SLEEP_COUNT times ($SLEEP_BETWEEN_RUNS sec each)
+Benchmark: redis-benchmark -n 100000 -d 1024 -c 50 -P 16 -t lpush,lrange --csv"
+
+  git commit -m "$COMMIT_MSG"
+
+  echo "✅ Committed results for $label to Git repository"
 
   # 親ディレクトリに戻る
-  cd ../..
+  cd "$ORIGINAL_PWD"
 
 ) # <--- サブシェルが終了し、exportした変数は自動的にリセットされる
 done
+
+# Final commit and push after all allocators complete
+cd "$ORIGINAL_PWD/$REDIS_BENCH_GIT_DIR"
+
+# Commit any remaining summary files
+git add "$TIMESTAMP/"
+
+# Create detailed final commit message
+TOTAL_SLEEP_COUNT=$(( (NUM_RUNS - 1) * ${#ALLOCATORS[@]} ))
+FINAL_COMMIT_MSG="complete benchmark session $TIMESTAMP
+
+Session summary:
+Allocators tested: ${#ALLOCATORS[@]}
+Runs per allocator: $NUM_RUNS
+Total sleep applied: $TOTAL_SLEEP_COUNT times ($SLEEP_BETWEEN_RUNS sec each)
+Benchmark: redis-benchmark -n 100000 -d 1024 -c 50 -P 16 -t lpush,lrange --csv
+Timestamp: $TIMESTAMP"
+
+# Only commit if there are changes
+if ! git diff --cached --quiet; then
+  git commit -m "$FINAL_COMMIT_MSG"
+  echo "✅ Final session commit created"
+fi
+
+# Push to remote repository (if configured)
+if git remote | grep -q origin; then
+  echo "📤 Pushing results to remote repository..."
+  git push origin $(git branch --show-current)
+  echo "✅ Results pushed to remote repository"
+else
+  echo "ℹ️  No remote repository configured. Results saved locally only."
+  echo "   To push results later, configure a remote with: git remote add origin <URL>"
+fi
+
+cd "$ORIGINAL_PWD"
 
 set +x
 echo "✅ All benchmarks completed."
 echo
 echo "=== SUMMARY FILES CREATED ==="
-echo "Throughput summary: $OUT_DIR_BASE/throughput_summary.csv"
-echo "Memory summary: $OUT_DIR_BASE/memory_summary.csv"
+echo "Throughput summary: $ORIGINAL_PWD/$OUT_DIR_BASE/throughput_summary.csv"
+echo "Memory summary: $ORIGINAL_PWD/$OUT_DIR_BASE/memory_summary.csv"
+echo "=== GIT REPOSITORY STATUS ==="
+echo "Git repository: $REDIS_BENCH_GIT_DIR"
+echo "Latest results committed and pushed (if remote configured)"
 echo "=============================="
