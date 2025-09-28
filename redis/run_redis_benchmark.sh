@@ -29,10 +29,17 @@ ALLOCATORS=(
 )
 
 # 4. 各アロケータで実行するテスト回数
-NUM_RUNS=20
+NUM_RUNS=30
 
 # 5. 各テスト実行間のスリープ時間（秒）
-SLEEP_BETWEEN_RUNS=300
+SLEEP_BETWEEN_RUNS=60
+
+# 6. ベンチマーク設定
+BENCH_OPERATIONS=1000      # -n パラメータ: 実行する操作数
+BENCH_DATA_SIZE=1024       # -d パラメータ: データサイズ（バイト）
+BENCH_CLIENTS=50           # -c パラメータ: 並行クライアント数
+BENCH_PIPELINE=16          # -P パラメータ: パイプライン設定
+BENCH_TESTS="lpush,lrange" # -t パラメータ: テストタイプ
 # --------------------------------------------------------------------
 
 
@@ -55,8 +62,8 @@ if [ ! -d "$REDIS_BENCH_GIT_DIR/.git" ]; then
   cd "$ORIGINAL_PWD"
 fi
 
-echo "allocator,avg_latency_ms,min_latency_ms,p50_latency_ms,p95_latency_ms" > "$OUT_DIR_BASE/throughput_summary.csv"
-echo "allocator,max_vmrss_mb,max_vmsize_mb,avg_vmrss_mb,avg_vmsize_mb" > "$OUT_DIR_BASE/memory_summary.csv"
+echo "allocator,mean_rps,stddev_rps,ci_lower_rps,ci_upper_rps" > "$OUT_DIR_BASE/throughput_summary.csv"
+echo "allocator,max_vmrss_mb,max_vmsize_mb,max_vmpeak_mb,max_vmhwm_mb,avg_vmrss_mb,avg_vmsize_mb,avg_vmpeak_mb,avg_vmhwm_mb" > "$OUT_DIR_BASE/memory_summary.csv"
 
 # 統計計算関数
 calculate_stats() {
@@ -188,7 +195,7 @@ for allocator_info in "${ALLOCATORS[@]}"; do
 
     get_memory_stats $SERVER_PID "$label" "before_benchmark" "$run"
 
-    "$REDIS_SRC_DIR/redis-benchmark" -n 100000 -d 1024 -c 50 -P 16 -t lpush,lrange --csv > "$CSV_OUT_FILE"
+    "$REDIS_SRC_DIR/redis-benchmark" -n $BENCH_OPERATIONS -d $BENCH_DATA_SIZE -c $BENCH_CLIENTS -P $BENCH_PIPELINE -t $BENCH_TESTS --csv > "$CSV_OUT_FILE"
 
     get_memory_stats $SERVER_PID "$label" "after_benchmark" "$run"
 
@@ -251,21 +258,39 @@ for allocator_info in "${ALLOCATORS[@]}"; do
   echo "=================================="
   echo
 
-  # LPUSH平均レイテンシ情報を収集してサマリーファイルに追加
-  lpush_avg_latency=$(grep ',"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$5; count++} END {printf "%.3f", (count>0 ? sum/count : 0)}')
-  lpush_min_latency=$(grep ',"LPUSH",' all_benchmark_results.csv | awk -F',' 'BEGIN{min=999999} {if($6+0<min) min=$6+0} END {printf "%.3f", (min==999999 ? 0 : min)}')
-  lpush_p50_latency=$(grep ',"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$7; count++} END {printf "%.3f", (count>0 ? sum/count : 0)}')
-  lpush_p95_latency=$(grep ',"LPUSH",' all_benchmark_results.csv | awk -F',' '{sum+=$8; count++} END {printf "%.3f", (count>0 ? sum/count : 0)}')
+  # LPUSH スループット情報を収集してサマリーファイルに追加
+
+  # Extract LPUSH throughput statistics from summary_statistics.csv
+  lpush_stats_line=$(grep ',LPUSH,' summary_statistics.csv 2>/dev/null || echo "")
+  if [ -n "$lpush_stats_line" ]; then
+    # Extract mean_rps, stddev_rps, ci_lower_rps, ci_upper_rps (columns 3,4,5,6)
+    lpush_mean_rps=$(echo "$lpush_stats_line" | awk -F',' '{print $3}')
+    lpush_stddev_rps=$(echo "$lpush_stats_line" | awk -F',' '{print $4}')
+    lpush_ci_lower_rps=$(echo "$lpush_stats_line" | awk -F',' '{print $5}')
+    lpush_ci_upper_rps=$(echo "$lpush_stats_line" | awk -F',' '{print $6}')
+  else
+    # Fallback values if no LPUSH data found
+    lpush_mean_rps="0"
+    lpush_stddev_rps="0"
+    lpush_ci_lower_rps="0"
+    lpush_ci_upper_rps="0"
+  fi
+
 
   # メモリ使用量の最大値と平均値を計算
   max_vmrss=$(awk -F',' 'NR>1 {if($5+0>max) max=$5+0} END {print (max ? max : 0)}' all_memory_stats.csv)
   max_vmsize=$(awk -F',' 'NR>1 {if($4+0>max) max=$4+0} END {print (max ? max : 0)}' all_memory_stats.csv)
+  max_vmpeak=$(awk -F',' 'NR>1 {if($6+0>max) max=$6+0} END {print (max ? max : 0)}' all_memory_stats.csv)
+  max_vmhwm=$(awk -F',' 'NR>1 {if($7+0>max) max=$7+0} END {print (max ? max : 0)}' all_memory_stats.csv)
   avg_vmrss=$(awk -F',' 'NR>1 {sum+=$5; count++} END {printf "%.2f", (count>0 ? sum/count : 0)}' all_memory_stats.csv)
   avg_vmsize=$(awk -F',' 'NR>1 {sum+=$4; count++} END {printf "%.2f", (count>0 ? sum/count : 0)}' all_memory_stats.csv)
+  avg_vmpeak=$(awk -F',' 'NR>1 {sum+=$6; count++} END {printf "%.2f", (count>0 ? sum/count : 0)}' all_memory_stats.csv)
+  avg_vmhwm=$(awk -F',' 'NR>1 {sum+=$7; count++} END {printf "%.2f", (count>0 ? sum/count : 0)}' all_memory_stats.csv)
 
   # サマリーファイルに書き込み (絶対パスを使用)
-  echo "$label,$lpush_avg_latency,$lpush_min_latency,$lpush_p50_latency,$lpush_p95_latency" >> "$ORIGINAL_PWD/$OUT_DIR_BASE/throughput_summary.csv"
-  echo "$label,$max_vmrss,$max_vmsize,$avg_vmrss,$avg_vmsize" >> "$ORIGINAL_PWD/$OUT_DIR_BASE/memory_summary.csv"
+
+  echo "$label,$lpush_mean_rps,$lpush_stddev_rps,$lpush_ci_lower_rps,$lpush_ci_upper_rps" >> "$ORIGINAL_PWD/$OUT_DIR_BASE/throughput_summary.csv"
+  echo "$label,$max_vmrss,$max_vmsize,$max_vmpeak,$max_vmhwm,$avg_vmrss,$avg_vmsize,$avg_vmpeak,$avg_vmhwm" >> "$ORIGINAL_PWD/$OUT_DIR_BASE/memory_summary.csv"
 
   # Git commit for this allocator's results
   cd "$ORIGINAL_PWD/$REDIS_BENCH_GIT_DIR"
@@ -279,7 +304,7 @@ Allocator: $label
 Config: ${export_vars:-default}
 Runs: $NUM_RUNS
 Sleep applied: $SLEEP_COUNT times ($SLEEP_BETWEEN_RUNS sec each)
-Benchmark: redis-benchmark -n 100000 -d 1024 -c 50 -P 16 -t lpush,lrange --csv"
+Benchmark: redis-benchmark -n $BENCH_OPERATIONS -d $BENCH_DATA_SIZE -c $BENCH_CLIENTS -P $BENCH_PIPELINE -t $BENCH_TESTS --csv"
 
   git commit -m "$COMMIT_MSG"
 
@@ -305,7 +330,7 @@ Session summary:
 Allocators tested: ${#ALLOCATORS[@]}
 Runs per allocator: $NUM_RUNS
 Total sleep applied: $TOTAL_SLEEP_COUNT times ($SLEEP_BETWEEN_RUNS sec each)
-Benchmark: redis-benchmark -n 100000 -d 1024 -c 50 -P 16 -t lpush,lrange --csv
+Benchmark: redis-benchmark -n $BENCH_OPERATIONS -d $BENCH_DATA_SIZE -c $BENCH_CLIENTS -P $BENCH_PIPELINE -t $BENCH_TESTS --csv
 Timestamp: $TIMESTAMP"
 
 # Only commit if there are changes
