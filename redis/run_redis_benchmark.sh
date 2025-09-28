@@ -16,7 +16,7 @@ set -euo pipefail
 REDIS_SRC_DIR="/home/uchino/software/mimalloc/redis/redis_source_build/redis-6.2.7/src"
 
 # 2. 結果を出力する親ディレクトリ (MMDDHH形式で自動生成)
-TIMESTAMP=$(date +"%m%d%H")
+TIMESTAMP=$(date +"%m%d%H%M")
 OUT_DIR_BASE="./redis_bench_results/$TIMESTAMP"
 
 # 3. テストしたいアロケータのリストを定義
@@ -29,14 +29,14 @@ ALLOCATORS=(
 )
 
 # 4. 各アロケータで実行するテスト回数
-NUM_RUNS=10
+NUM_RUNS=30
 
 # 5. 各テスト実行間のスリープ時間（秒）
 SLEEP_BETWEEN_RUNS=60
 
 # 6. ベンチマーク設定
 BENCH_OPERATIONS=1000      # -n パラメータ: 実行する操作数
-BENCH_DATA_SIZE=10       # -d パラメータ: データサイズ（バイト）
+BENCH_DATA_SIZE=100       # -d パラメータ: データサイズ（バイト）
 BENCH_CLIENTS=50           # -c パラメータ: 並行クライアント数
 BENCH_PIPELINE=16          # -P パラメータ: パイプライン設定
 BENCH_TESTS="lpush,lrange" # -t パラメータ: テストタイプ
