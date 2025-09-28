@@ -15,24 +15,24 @@ set -euo pipefail
 # 1. Redisの実行ファイルがあるディレクトリのパス
 REDIS_SRC_DIR="/home/uchino/software/mimalloc/redis/redis_source_build/redis-6.2.7/src"
 
-# 2. 結果を出力する親ディレクトリ
-OUT_DIR_BASE="./redis_bench_results"
+# 2. 結果を出力する親ディレクトリ (MMDDHH形式で自動生成)
+TIMESTAMP=$(date +"%m%d%H")
+OUT_DIR_BASE="./redis_bench_results/$TIMESTAMP"
 
 # 3. テストしたいアロケータのリストを定義
 # フォーマット: "ラベル|ライブラリへの絶対パス|exportする環境変数(複数の場合は';'で区切る)"
 ALLOCATORS=(
+  "mimalloc_default|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|"
+  "mi_PAGEMAP|/home/uchino/software/mimalloc/out/pagemap_commit_1/libmimalloc.so.3.1|"
+  "mimalloc_optimized|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
   "system|system|"
-#   "mimalloc|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|"
-#   "mi_PAGEMAP|/home/uchino/software/mimalloc/out/pagemap_commit_1/libmimalloc.so.3.1|"
-#   "mimalloc|/home/uchino/software/mimalloc/out/release/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
-
 )
 
 # 4. 各アロケータで実行するテスト回数
-NUM_RUNS=3
+NUM_RUNS=20
 
 # 5. 各テスト実行間のスリープ時間（秒）
-SLEEP_BETWEEN_RUNS=1
+SLEEP_BETWEEN_RUNS=300
 # --------------------------------------------------------------------
 
 
@@ -173,7 +173,7 @@ for allocator_info in "${ALLOCATORS[@]}"; do
 
     get_memory_stats $SERVER_PID "$label" "before_benchmark" "$run"
 
-    "$REDIS_SRC_DIR/redis-benchmark" -n 1000000 -d 1024 -c 50 -P 16 -t lpush,lrange --csv > "$CSV_OUT_FILE"
+    "$REDIS_SRC_DIR/redis-benchmark" -n 100000 -d 1024 -c 50 -P 16 -t lpush,lrange --csv > "$CSV_OUT_FILE"
 
     get_memory_stats $SERVER_PID "$label" "after_benchmark" "$run"
 
