@@ -37,10 +37,10 @@ ALLOCATORS=(
 )
 
 # 4. 各アロケータで実行するテスト回数
-NUM_RUNS=30
+NUM_RUNS=10
 
 # 5. 各テスト実行間のスリープ時間（秒）
-SLEEP_BETWEEN_RUNS=60
+SLEEP_BETWEEN_RUNS=300
 
 # 6. ベンチマーク設定
 BENCH_OPERATIONS=1000      # -n パラメータ: 実行する操作数
