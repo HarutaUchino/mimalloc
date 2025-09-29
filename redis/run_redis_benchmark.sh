@@ -15,9 +15,11 @@ set -euo pipefail
 # 1. Redisの実行ファイルがあるディレクトリのパス
 REDIS_SRC_DIR="/home/uchino/software/mimalloc/redis/redis_source_build/redis-6.2.7/src"
 
-# 2. 結果を出力する親ディレクトリ (MMDDHH形式で自動生成)
-TIMESTAMP=$(date +"%m%d%H%M")
-OUT_DIR_BASE="./redis_bench_results/$TIMESTAMP"
+# 2. 結果を出力する親ディレクトリ (MM/DD/HHMM形式で自動生成)
+MONTH=$(date +"%m")
+DAY=$(date +"%d")
+HHMM=$(date +"%H%M")
+OUT_DIR_BASE="./redis_bench_results/$MONTH/$DAY/$HHMM"
 
 # 3. テストしたいアロケータのリストを定義
 # フォーマット: "ラベル|ライブラリへの絶対パス|exportする環境変数(複数の場合は';'で区切る)"
@@ -30,10 +32,13 @@ ALLOCATORS=(
   "mimalloc_slice_8KB|/home/uchino/software/mimalloc/out/slice_8KB/libmimalloc.so.3.1|"
   "mimalloc_slice_16KB|/home/uchino/software/mimalloc/out/slice_16KB/libmimalloc.so.3.1|"
   "mimalloc_slice_32KB|/home/uchino/software/mimalloc/out/slice_32KB/libmimalloc.so.3.1|"
-  # slice size allocators with optimized options
-  "mimalloc_slice_8KB_opt|/home/uchino/software/mimalloc/out/slice_8KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
-  "mimalloc_slice_16KB_opt|/home/uchino/software/mimalloc/out/slice_16KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
-  "mimalloc_slice_32KB_opt|/home/uchino/software/mimalloc/out/slice_32KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
+  "mimalloc_slice_128KB|/home/uchino/software/mimalloc/out/slice_128KB/libmimalloc.so.3.1|"
+  "mimalloc_slice_256KB|/home/uchino/software/mimalloc/out/slice_256KB/libmimalloc.so.3.1|"
+  "mimalloc_slice_512KB|/home/uchino/software/mimalloc/out/slice_512KB/libmimalloc.so.3.1|"
+  # # slice size allocators with optimized options
+  # "mimalloc_slice_8KB_opt|/home/uchino/software/mimalloc/out/slice_8KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
+  # "mimalloc_slice_16KB_opt|/home/uchino/software/mimalloc/out/slice_16KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
+  # "mimalloc_slice_32KB_opt|/home/uchino/software/mimalloc/out/slice_32KB/libmimalloc.so.3.1|MIMALLOC_ARENA_EAGER_COMMIT=1;MIMALLOC_PAGE_COMMIT_ON_DEMAND=0;MIMALLOC_PAGEMAP_COMMIT=1;MIMALLOC_PURGE_DELAY=-1"
 )
 
 # 4. 各アロケータで実行するテスト回数
@@ -302,7 +307,7 @@ for allocator_info in "${ALLOCATORS[@]}"; do
 
   # Git commit for this allocator's results
   cd "$ORIGINAL_PWD/$REDIS_BENCH_GIT_DIR"
-  git add "$TIMESTAMP/"
+  git add "$MONTH/$DAY/$HHMM/"
 
   # Create detailed commit message
   SLEEP_COUNT=$((NUM_RUNS - 1))  # Sleep applied between runs, so one less than total runs
@@ -328,18 +333,18 @@ done
 cd "$ORIGINAL_PWD/$REDIS_BENCH_GIT_DIR"
 
 # Commit any remaining summary files
-git add "$TIMESTAMP/"
+git add "$MONTH/$DAY/$HHMM/"
 
 # Create detailed final commit message
 TOTAL_SLEEP_COUNT=$(( (NUM_RUNS - 1) * ${#ALLOCATORS[@]} ))
-FINAL_COMMIT_MSG="complete benchmark session $TIMESTAMP
+FINAL_COMMIT_MSG="complete benchmark session $MONTH/$DAY/$HHMM
 
 Session summary:
 Allocators tested: ${#ALLOCATORS[@]}
 Runs per allocator: $NUM_RUNS
 Total sleep applied: $TOTAL_SLEEP_COUNT times ($SLEEP_BETWEEN_RUNS sec each)
 Benchmark: redis-benchmark -n $BENCH_OPERATIONS -d $BENCH_DATA_SIZE -c $BENCH_CLIENTS -P $BENCH_PIPELINE -t $BENCH_TESTS --csv
-Timestamp: $TIMESTAMP"
+Timestamp: $MONTH/$DAY/$HHMM"
 
 # Only commit if there are changes
 if ! git diff --cached --quiet; then
