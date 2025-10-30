@@ -11,3 +11,7 @@ docs/
 *.gz
 .vscode
 .DS_STore
+
+redis/
+redis/redis_bench_results/
+redis/redis_bench_results/*
