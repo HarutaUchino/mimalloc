@@ -156,10 +156,36 @@ static inline mi_page_t* mi_validate_ptr_page(const void* p, const char* msg)
   #endif
 }
 
-// Free a block
-// Fast path written carefully to prevent register spilling on the stack
-void mi_free(void* p) mi_attr_noexcept
+// ==== BEGIN: added thread-safe statistics for mi_free ====
+static volatile _Atomic(int64_t) g_free_call_count       = 0;
+static volatile _Atomic(int64_t) g_free_total_time_us    = 0;
+static volatile _Atomic(int64_t) g_free_min_time_us      = 0x7fffffffffffffffLL;
+static volatile _Atomic(int64_t) g_free_max_time_us      = 0;
+
+// Function to print free performance statistics
+static void print_free_stats(void) {
+  int64_t call_count = mi_atomic_loadi64_relaxed(&g_free_call_count);
+  int64_t total_time = mi_atomic_loadi64_relaxed(&g_free_total_time_us);
+  int64_t min_time   = mi_atomic_loadi64_relaxed(&g_free_min_time_us);
+  int64_t max_time   = mi_atomic_loadi64_relaxed(&g_free_max_time_us);
+  int64_t avg_time_us = (call_count > 0) ? total_time / call_count : 0;
+
+  _mi_fprintf(NULL, NULL, "\n=== FINAL MI_FREE PERFORMANCE STATISTICS ===\n");
+  _mi_fprintf(NULL, NULL, "Total mi_free calls: %lld\n", (long long)call_count);
+  _mi_fprintf(NULL, NULL, "Total execution time: %lld microseconds\n", (long long)total_time);
+  _mi_fprintf(NULL, NULL, "Average time per call: %lld microseconds\n", (long long)avg_time_us);
+  _mi_fprintf(NULL, NULL, "Minimum call time: %lld microseconds\n", (long long)((min_time == 0x7fffffffffffffffLL) ? 0 : min_time));
+  _mi_fprintf(NULL, NULL, "Maximum call time: %lld microseconds\n", (long long)max_time);
+  _mi_fprintf(NULL, NULL, "============================================\n");
+}
+
+// Free a block (instrumented version)
+static void mi_free_instrumented(void* p) mi_attr_noexcept
 {
+  // Start timing
+  clock_t start_time = clock();
+
+  // Actual free logic
   mi_page_t* const page = mi_validate_ptr_page(p,"mi_free");
   if mi_unlikely(page==NULL) return;  // page will be NULL if p==NULL
   mi_assert_internal(p!=NULL && page!=NULL);
@@ -184,7 +210,53 @@ void mi_free(void* p) mi_attr_noexcept
     // page is full or contains (inner) aligned blocks; use generic multi-thread path
     mi_free_generic_mt(page, p);
   }
+
+  // End timing
+  clock_t end_time = clock();
+  int64_t execution_time_us = ((int64_t)(end_time - start_time) * 1000000LL) / CLOCKS_PER_SEC;
+
+  // Update statistics atomically
+  mi_atomic_addi64_acq_rel(&g_free_call_count, 1);
+  mi_atomic_addi64_acq_rel(&g_free_total_time_us, execution_time_us);
+
+  // Update min
+  int64_t cur_min = mi_atomic_loadi64_relaxed(&g_free_min_time_us);
+  while (execution_time_us < cur_min) {
+    if (mi_atomic_casi64_strong_acq_rel(&g_free_min_time_us, &cur_min, execution_time_us)) {
+      break;
+    }
+  }
+
+  // Update max
+#if defined(mi_atomic_maxi64_relaxed)
+  mi_atomic_maxi64_relaxed(&g_free_max_time_us, execution_time_us);
+#else
+  int64_t cur_max = mi_atomic_loadi64_relaxed(&g_free_max_time_us);
+  while (execution_time_us > cur_max) {
+    if (mi_atomic_casi64_strong_acq_rel(&g_free_max_time_us, &cur_max, execution_time_us)) {
+      break;
+    }
+  }
+#endif
 }
+
+// Main mi_free function with instrumentation
+void mi_free(void* p) mi_attr_noexcept
+{
+  // One-time initialization
+  static volatile _Atomic(int64_t) is_initialized = 0;
+  if (mi_atomic_loadi64_relaxed(&is_initialized) == 0) {
+    int64_t expected = 0;
+    if (mi_atomic_casi64_strong_acq_rel(&is_initialized, &expected, 1)) {
+      if (atexit(print_free_stats) == 0) {
+        _mi_fprintf(NULL, NULL, "MI_FREE performance tracking initialized\n");
+      }
+    }
+  }
+
+  mi_free_instrumented(p);
+}
+// ==== END: added thread-safe statistics for mi_free ====
 
 
 // ------------------------------------------------------
