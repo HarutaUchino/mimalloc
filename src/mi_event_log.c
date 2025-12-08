@@ -9,8 +9,8 @@
 #include <string.h>
 #include <time.h>
 
-// #define MI_TIMESTAMP_QUANTUM_US 10000000ULL  // store timestamps rounded to 1000 microseconds
-#define MI_TIMESTAMP_QUANTUM_US 100000ULL
+// #define MI_TIMESTAMP_QUANTUM_US 10000000ULL  // previous coarse granularity
+#define MI_TIMESTAMP_QUANTUM_US 1000ULL        // store timestamps rounded to 0.001 seconds (1000 microseconds)
 struct mi_event {
   uint64_t timestamp_us;
   uint8_t  event_type;
@@ -31,6 +31,8 @@ static _Atomic uint64_t       alloc_memset_calls = 0;
 static _Atomic uint64_t       alloc_memset_bytes = 0;
 static _Atomic uint64_t       free_memset_calls = 0;
 static _Atomic uint64_t       free_memset_bytes = 0;
+static _Atomic uint64_t       current_timestamp = UINT64_MAX;
+static _Atomic uint64_t       current_slot = UINT64_MAX;
 static _Atomic int            mi_log_state = 0; /* 0 = not started, 1 = initializing, 2 = ready */
 static _Atomic int            mi_flush_registered = 0;
 static uint64_t               mi_start_us = 0;
@@ -94,11 +96,6 @@ void mi_log_event(int event_type) {
     return;
   }
   mi_event_log_init();
-  const uint64_t slot = mi_record_index();
-  if (slot >= MI_MAX_EVENTS) {
-    return; /* buffer full */
-  }
-
   uint64_t alloc_total;
   uint64_t free_total;
   if (event_type == MI_EVENT_TYPE_ALLOC) {
@@ -113,7 +110,26 @@ void mi_log_event(int event_type) {
   struct mi_event evt;
   const uint64_t now_us = mi_now_us();
   uint64_t delta_us = (mi_start_us == 0 ? 0 : (now_us - mi_start_us));
-  evt.timestamp_us = mi_quantize_timestamp(delta_us);
+  const uint64_t qdelta = mi_quantize_timestamp(delta_us);
+
+  uint64_t slot;
+  while (true) {
+    uint64_t ts = atomic_load_explicit(&current_timestamp, memory_order_relaxed);
+    if (ts == qdelta && ts != UINT64_MAX) {
+      slot = atomic_load_explicit(&current_slot, memory_order_relaxed);
+      break;
+    }
+    uint64_t new_slot = mi_record_index();
+    if (new_slot >= MI_MAX_EVENTS) return;
+    uint64_t expected_ts = ts;
+    if (atomic_compare_exchange_strong_explicit(&current_timestamp, &expected_ts, qdelta,
+                                                memory_order_acq_rel, memory_order_relaxed)) {
+      atomic_store_explicit(&current_slot, new_slot, memory_order_release);
+      slot = new_slot;
+      break;
+    }
+  }
+  evt.timestamp_us = qdelta;
   evt.event_type   = (uint8_t)event_type;
   evt.alloc_count  = alloc_total;
   evt.free_count   = free_total;
