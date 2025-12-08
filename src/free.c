@@ -12,6 +12,8 @@ terms of the MIT license. A copy of the license can be found in the file
 #include "mimalloc/prim.h"   // _mi_prim_thread_id()
 #endif
 
+#include "mi_event_log.h"
+
 // forward declarations
 static void   mi_check_padding(const mi_page_t* page, const mi_block_t* block);
 static bool   mi_check_is_double_free(const mi_page_t* page, const mi_block_t* block);
@@ -238,6 +240,8 @@ static void mi_free_instrumented(void* p) mi_attr_noexcept
     }
   }
 #endif
+
+  mi_log_event(MI_EVENT_TYPE_FREE);
 }
 
 // Main mi_free function with instrumentation

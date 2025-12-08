@@ -12,6 +12,7 @@ terms of the MIT license. A copy of the license can be found in the file
 #include "mimalloc/internal.h"
 #include "mimalloc/atomic.h"
 #include "mimalloc/prim.h"   // _mi_prim_thread_id()
+#include "mi_event_log.h"
 
 #include <string.h>      // memset, strlen (for mi_strdup)
 #include <stdlib.h>      // malloc, abort
@@ -304,6 +305,9 @@ mi_decl_nodiscard extern void* mi_malloc_instrumented(size_t size) mi_attr_noexc
   // int64_t calls = mi_atomic_loadi64_relaxed(&g_malloc_call_count);
   // if ((calls % PERIODIC_REPORT_INTERVAL) == 0) print_malloc_stats(0);
 
+  if (result != NULL) {
+    mi_log_event(MI_EVENT_TYPE_ALLOC);
+  }
   return result;
 }
 

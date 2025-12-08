@@ -63,6 +63,7 @@ set(mi_sources
     src/heap.c
     src/init.c
     src/libc.c
+    src/mi_event_log.c
     src/options.c
     src/os.c
     src/page.c

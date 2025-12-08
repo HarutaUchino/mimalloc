@@ -18,3 +18,4 @@ test/
 !test/CMakeLists.txt
 
 diff/
+redis/
