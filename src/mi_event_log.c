@@ -2,24 +2,35 @@
 
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
+// #define MI_TIMESTAMP_QUANTUM_US 10000000ULL  // store timestamps rounded to 1000 microseconds
+#define MI_TIMESTAMP_QUANTUM_US 100000ULL
 struct mi_event {
   uint64_t timestamp_us;
   uint8_t  event_type;
   uint64_t alloc_count;
   uint64_t free_count;
   int64_t  delta;
+  uint64_t alloc_memset_calls;
+  uint64_t alloc_memset_bytes;
+  uint64_t free_memset_calls;
+  uint64_t free_memset_bytes;
 };
 
 static struct mi_event        events[MI_MAX_EVENTS];
 static _Atomic uint64_t       event_index = 0;
 static _Atomic uint64_t       mi_alloc_calls = 0;
 static _Atomic uint64_t       mi_free_calls = 0;
+static _Atomic uint64_t       alloc_memset_calls = 0;
+static _Atomic uint64_t       alloc_memset_bytes = 0;
+static _Atomic uint64_t       free_memset_calls = 0;
+static _Atomic uint64_t       free_memset_bytes = 0;
 static _Atomic int            mi_log_state = 0; /* 0 = not started, 1 = initializing, 2 = ready */
 static _Atomic int            mi_flush_registered = 0;
 static uint64_t               mi_start_us = 0;
@@ -32,6 +43,13 @@ static uint64_t mi_now_us(void) {
     return 0;
   }
   return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)(ts.tv_nsec / 1000ULL);
+}
+
+static uint64_t mi_quantize_timestamp(uint64_t delta_us) {
+  if (delta_us == 0) {
+    return 0;
+  }
+  return (delta_us / MI_TIMESTAMP_QUANTUM_US) * MI_TIMESTAMP_QUANTUM_US;
 }
 
 static void mi_event_log_register_flush(void) {
@@ -94,12 +112,28 @@ void mi_log_event(int event_type) {
 
   struct mi_event evt;
   const uint64_t now_us = mi_now_us();
-  evt.timestamp_us = (mi_start_us == 0 ? 0 : (now_us - mi_start_us));
+  uint64_t delta_us = (mi_start_us == 0 ? 0 : (now_us - mi_start_us));
+  evt.timestamp_us = mi_quantize_timestamp(delta_us);
   evt.event_type   = (uint8_t)event_type;
   evt.alloc_count  = alloc_total;
   evt.free_count   = free_total;
   evt.delta        = (int64_t)alloc_total - (int64_t)free_total;
+  evt.alloc_memset_calls = atomic_load_explicit(&alloc_memset_calls, memory_order_relaxed);
+  evt.alloc_memset_bytes = atomic_load_explicit(&alloc_memset_bytes, memory_order_relaxed);
+  evt.free_memset_calls  = atomic_load_explicit(&free_memset_calls, memory_order_relaxed);
+  evt.free_memset_bytes  = atomic_load_explicit(&free_memset_bytes, memory_order_relaxed);
   events[slot] = evt;
+}
+
+void mi_log_memset(int memset_kind, size_t bytes) {
+  if (memset_kind == MI_MEMSET_ALLOC) {
+    atomic_fetch_add_explicit(&alloc_memset_calls, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&alloc_memset_bytes, (uint64_t)bytes, memory_order_relaxed);
+  }
+  else if (memset_kind == MI_MEMSET_FREE) {
+    atomic_fetch_add_explicit(&free_memset_calls, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&free_memset_bytes, (uint64_t)bytes, memory_order_relaxed);
+  }
 }
 
 static bool mi_write_csv(uint64_t count) {
@@ -110,15 +144,19 @@ static bool mi_write_csv(uint64_t count) {
   if (fp == NULL) {
     return false;
   }
-  fputs("timestamp_us,event_type,alloc_count,free_count,delta\n", fp);
+  fputs("timestamp_us,event_type,alloc_count,free_count,delta,alloc_memset_calls,alloc_memset_bytes,free_memset_calls,free_memset_bytes\n", fp);
   for (uint64_t i = 0; i < count && i < MI_MAX_EVENTS; ++i) {
     const struct mi_event* evt = &events[i];
-    fprintf(fp, "%llu,%u,%llu,%llu,%lld\n",
+    fprintf(fp, "%llu,%u,%llu,%llu,%lld,%llu,%llu,%llu,%llu\n",
             (unsigned long long)evt->timestamp_us,
             (unsigned int)evt->event_type,
             (unsigned long long)evt->alloc_count,
             (unsigned long long)evt->free_count,
-            (long long)evt->delta);
+            (long long)evt->delta,
+            (unsigned long long)evt->alloc_memset_calls,
+            (unsigned long long)evt->alloc_memset_bytes,
+            (unsigned long long)evt->free_memset_calls,
+            (unsigned long long)evt->free_memset_bytes);
   }
   fclose(fp);
   return true;

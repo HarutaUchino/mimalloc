@@ -1160,6 +1160,23 @@ static inline void _mi_memset(void* dst, int val, size_t n) {
 #endif
 
 // -------------------------------------------------------------------------------
+#if !defined(MI_MEMSET_ALLOC)
+#define MI_MEMSET_ALLOC 1
+#endif
+#if !defined(MI_MEMSET_FREE)
+#define MI_MEMSET_FREE  2
+#endif
+
+#if defined(MI_EVENT_LOGGING)
+void mi_log_memset(int memset_kind, size_t bytes);
+#else
+static inline void mi_log_memset(int memset_kind, size_t bytes) {
+  MI_UNUSED(memset_kind);
+  MI_UNUSED(bytes);
+}
+#endif
+
+// -------------------------------------------------------------------------------
 // The `_mi_memcpy_aligned` can be used if the pointers are machine-word aligned
 // This is used for example in `mi_realloc`.
 // -------------------------------------------------------------------------------
@@ -1177,6 +1194,9 @@ static inline void _mi_memset_aligned(void* dst, int val, size_t n) {
   mi_assert_internal((uintptr_t)dst % MI_INTPTR_SIZE == 0);
   void* adst = __builtin_assume_aligned(dst, MI_INTPTR_SIZE);
   _mi_memset(adst, val, n);
+  if (n > 0) {
+    mi_log_memset((val == 0 ? MI_MEMSET_ALLOC : MI_MEMSET_FREE), n);
+  }
 }
 #else
 // Default fallback on `_mi_memcpy`
@@ -1188,6 +1208,9 @@ static inline void _mi_memcpy_aligned(void* dst, const void* src, size_t n) {
 static inline void _mi_memset_aligned(void* dst, int val, size_t n) {
   mi_assert_internal((uintptr_t)dst % MI_INTPTR_SIZE == 0);
   _mi_memset(dst, val, n);
+  if (n > 0) {
+    mi_log_memset((val == 0 ? MI_MEMSET_ALLOC : MI_MEMSET_FREE), n);
+  }
 }
 #endif
 

@@ -33,9 +33,11 @@ static inline void mi_free_block_local(mi_page_t* page, mi_block_t* block, bool 
   if mi_unlikely(mi_check_is_double_free(page, block)) return;
   mi_check_padding(page, block);
   if (track_stats) { mi_stat_free(page, block); }
-  #if (MI_DEBUG>0) && !MI_TRACK_ENABLED  && !MI_TSAN && !MI_GUARDED
-  memset(block, MI_DEBUG_FREED, mi_page_block_size(page));
-  #endif
+#if (MI_DEBUG>0) && !MI_TRACK_ENABLED  && !MI_TSAN && !MI_GUARDED
+  const size_t block_bytes = mi_page_block_size(page);
+  memset(block, MI_DEBUG_FREED, block_bytes);
+  mi_log_memset(MI_MEMSET_FREE, block_bytes);
+#endif
   if (track_stats) { mi_track_free_size(block, mi_page_usable_size_of(page, block)); } // faster then mi_usable_size as we already know the page and that p is unaligned
 
   // actual free: push on the local free list
@@ -64,6 +66,7 @@ static inline void mi_free_block_mt(mi_page_t* page, mi_block_t* block) mi_attr_
   size_t dbgsize = mi_usable_size(block);
   if (dbgsize > MI_MiB) { dbgsize = MI_MiB; }
   _mi_memset_aligned(block, MI_DEBUG_FREED, dbgsize);
+  mi_log_memset(MI_MEMSET_FREE, dbgsize);
 #endif
 
   // push atomically on the page thread free list

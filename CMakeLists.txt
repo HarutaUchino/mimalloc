@@ -83,6 +83,8 @@ else()
  set(mi_defines "")
 endif()
 
+list(APPEND mi_defines MI_EVENT_LOGGING=1)
+
 # pass git revision as a define
 if(EXISTS "${CMAKE_SOURCE_DIR}/.git/index")
   find_package(Git)
